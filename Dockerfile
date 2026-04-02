@@ -7,7 +7,7 @@ FROM python:3.12 AS build-python
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 系統編譯依賴
+# 系統編譯依賴 (Saleor 必須)
 RUN apt-get update && apt-get install -y \
     build-essential \
     gettext \
@@ -27,10 +27,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 # 複製依賴檔案
 COPY pyproject.toml uv.lock ./
 
-# 【究極修正】: 使用 Railway BuildKit 認可的 default ID 格式
-# 如果連這個都過不了，代表該區域的編譯器暫時不支援 --mount=type=cache
-RUN --mount=type=cache,id=default,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --no-editable
+# 【究極修復】: 直接移除 --mount=type=cache
+# 這是避開 "Cache mount ID is not prefixed" 報錯的唯一方法
+RUN uv sync --locked --no-install-project --no-editable
 
 
 ### =========================
@@ -41,10 +40,10 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 建立非 root 用戶
+# 建立非 root 用戶提高安全性
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
-# 執行階段必要套件
+# 執行階段必要套件 (PostgreSQL 連線與影像處理)
 RUN apt-get update && apt-get install -y \
     libffi8 \
     libgdk-pixbuf-2.0-0 \
@@ -63,7 +62,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 RUN mkdir -p /app/media /app/static && chown -R saleor:saleor /app/
 
-# 從 build 階段拷貝已安裝的環境
+# 從 build 階段拷貝已安裝的套件環境
 COPY --from=build-python /usr/local/ /usr/local/
 
 # 拷貝程式碼
