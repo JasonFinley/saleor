@@ -7,7 +7,7 @@ FROM python:3.12 AS build-python
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 系統編譯依賴
+# 安裝編譯依賴
 RUN apt-get update && apt-get install -y \
     build-essential \
     gettext \
@@ -27,9 +27,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 # 複製依賴檔案
 COPY pyproject.toml uv.lock ./
 
-# 【修正方案】移除 id=，直接讓 Buildkit 使用路徑作為 Key
-# 這樣能避開 Railway 對 ID 命名的檢查規則
-RUN --mount=type=cache,target=/root/.cache/uv \
+# 【最終修正】: 嚴格遵守 Railway 要求，使用帶有前綴的 id
+RUN --mount=type=cache,id=saleor-app-uv-cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-editable
 
 
@@ -41,10 +40,10 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 建立用戶
+# 建立非 root 用戶
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
-# 執行階段依賴
+# 執行階段必要套件
 RUN apt-get update && apt-get install -y \
     libffi8 \
     libgdk-pixbuf-2.0-0 \
@@ -63,13 +62,13 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 RUN mkdir -p /app/media /app/static && chown -R saleor:saleor /app/
 
-# 從 build 階段拷貝套件
+# 從 build 階段拷貝已安裝的環境
 COPY --from=build-python /usr/local/ /usr/local/
 
 # 拷貝程式碼
 COPY . /app
 
-# 靜態檔案
+# 靜態檔案預處理
 ARG STATIC_URL=/static/
 ENV STATIC_URL=${STATIC_URL}
 RUN SECRET_KEY=dummy-for-build python manage.py collectstatic --no-input
