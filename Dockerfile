@@ -7,7 +7,7 @@ FROM python:3.12 AS build-python
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 安裝構建必要的系統套件
+# 系統編譯依賴
 RUN apt-get update && apt-get install -y \
     build-essential \
     gettext \
@@ -17,21 +17,21 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 從官方鏡像引入 uv
+# 引入 uv
 COPY --from=ghcr.io/astral-sh/uv:0.10.8 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_SYSTEM_PYTHON=1 \
     UV_PROJECT_ENVIRONMENT=/usr/local
 
-# 複製依賴清單
+# 複製依賴檔案
 COPY pyproject.toml uv.lock ./
 
-# 修正：加入具備專案別名的 cache id 以消除警告
-RUN --mount=type=cache,id=saleor-project-uv-cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+# 【修正方案】移除 id=，直接讓 Buildkit 使用路徑作為 Key
+# 這樣能避開 Railway 對 ID 命名的檢查規則
+RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-editable
+
 
 ### =========================
 ### Final runtime stage
@@ -41,10 +41,10 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 建立非 root 用戶以提高安全性
+# 建立用戶
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
-# 安裝 Saleor 執行所需的 Runtime 依賴
+# 執行階段依賴
 RUN apt-get update && apt-get install -y \
     libffi8 \
     libgdk-pixbuf-2.0-0 \
@@ -61,27 +61,21 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+RUN mkdir -p /app/media /app/static && chown -R saleor:saleor /app/
 
-# 建立靜態與媒體資料夾並授權
-RUN mkdir -p /app/media /app/static \
-    && chown -R saleor:saleor /app/
-
-# 從 build 階段將安裝好的 python 核心套件與 bin 拷貝過來
+# 從 build 階段拷貝套件
 COPY --from=build-python /usr/local/ /usr/local/
 
-# 拷貝專案原始碼
+# 拷貝程式碼
 COPY . /app
 
-# 靜態檔案預處理 (在 Build 時完成，減少 Runtime 負荷)
+# 靜態檔案
 ARG STATIC_URL=/static/
 ENV STATIC_URL=${STATIC_URL}
-RUN SECRET_KEY=dummy-for-collectstatic python manage.py collectstatic --no-input
+RUN SECRET_KEY=dummy-for-build python manage.py collectstatic --no-input
 
-# 切換到非 root 用戶
 USER saleor
-
-# Railway 預設會偵測 8000 或由 PORT 環境變數指定
 EXPOSE 8000
 
-# 啟動命令：使用 sh -c 以確保環境變數 $PORT 能被讀取
+# 啟動指令：使用 sh -c 以支援 Railway 的 $PORT 注入
 CMD ["sh", "-c", "uvicorn saleor.asgi:application --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --lifespan on --ws none --no-server-header --no-access-log --timeout-keep-alive 35 --timeout-graceful-shutdown 30 --limit-max-requests 10000"]
