@@ -27,8 +27,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 # 複製依賴檔案
 COPY pyproject.toml uv.lock ./
 
-# 【最終修正】: 嚴格遵守 Railway 要求，使用帶有前綴的 id
-RUN --mount=type=cache,id=saleor-app-uv-cache,target=/root/.cache/uv \
+# 【最終修正】: 使用符合規範的 cache- 前綴 ID
+# 格式：cache-[項目名稱]-[工具名稱]
+RUN --mount=type=cache,id=cache-saleor-uv,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-editable
 
 
@@ -43,7 +44,7 @@ ENV PYTHONUNBUFFERED=1 \
 # 建立非 root 用戶
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
-# 執行階段必要套件
+# 執行階段必要套件 (Saleor 核心依賴)
 RUN apt-get update && apt-get install -y \
     libffi8 \
     libgdk-pixbuf-2.0-0 \
