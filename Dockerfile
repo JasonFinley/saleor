@@ -8,7 +8,7 @@ FROM python:3.12 AS build-python
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# System deps for building
+# System deps for building packages
 RUN apt-get update && apt-get install -y \
     build-essential \
     gettext \
@@ -28,23 +28,25 @@ ENV UV_COMPILE_BYTECODE=1 \
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
+# Install dependencies (FIXED: cache mount requires id)
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project --no-editable
 
 
 ### =========================
-### Final runtime image
+### Final runtime stage
 ### =========================
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Create user
+# Create non-root user
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
-# System dependencies (IMPORTANT: includes libmagic)
+# Runtime system dependencies
 RUN apt-get update && apt-get install -y \
     libffi8 \
     libgdk-pixbuf-2.0-0 \
@@ -60,19 +62,19 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app dirs
+# App directories
 RUN mkdir -p /app/media /app/static \
     && chown -R saleor:saleor /app/
 
 WORKDIR /app
 
-# Copy installed python packages
+# Copy python environment from build stage
 COPY --from=build-python /usr/local/ /usr/local/
 
-# Copy project
+# Copy project files
 COPY . /app
 
-# Collect static
+# Collect static files
 ARG STATIC_URL=/static/
 ENV STATIC_URL=${STATIC_URL}
 
@@ -84,5 +86,5 @@ USER saleor
 
 EXPOSE 8000
 
-# Runtime
+# Run server
 CMD ["uvicorn", "saleor.asgi:application", "--host=0.0.0.0", "--port=8000", "--workers=2", "--lifespan=on", "--ws=none", "--no-server-header", "--no-access-log", "--timeout-keep-alive=35", "--timeout-graceful-shutdown=30", "--limit-max-requests=10000"]
