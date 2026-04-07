@@ -10,20 +10,21 @@ RUN apt-get -y update \
 # Install Python dependencies
 WORKDIR /app
 
-# 修正：加上 id=<cache-id> 以符合 Railway/Docker 最新規範
-RUN --mount=type=cache,id=pip-cache,mode=0755,target=/root/.cache/pip \
+# 修正：加上 s/ 前綴以符合 Railway 構建規範
+RUN --mount=type=cache,id=s/pip-cache,mode=0755,target=/root/.cache/pip \
     pip install poetry==1.7.0
 
 RUN poetry config virtualenvs.create false
 COPY poetry.lock pyproject.toml /app/
 
-# 修正：針對 poetry 安裝也加上唯一的 cache id
-RUN --mount=type=cache,id=poetry-cache,mode=0755,target=/root/.cache/pypoetry \
+# 修正：加上 s/ 前綴以符合 Railway 構建規範
+RUN --mount=type=cache,id=s/poetry-cache,mode=0755,target=/root/.cache/pypoetry \
     poetry install --no-root
 
 ### Final image
 FROM python:3.12-slim
 
+# 建立執行用戶
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
 RUN apt-get update \
@@ -40,7 +41,6 @@ RUN apt-get update \
   libxml2 \
   libpq5 \
   libmagic1 \
-  # Required to allows to identify file types when handling file uploads
   media-types \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
@@ -48,20 +48,19 @@ RUN apt-get update \
 RUN mkdir -p /app/media /app/static \
   && chown -R saleor:saleor /app/
 
-# 從 build 階段複製安裝好的套件
+# 從 build 階段複製已安裝的套件與二進位檔案
 COPY --from=build-python /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 COPY --from=build-python /usr/local/bin/ /usr/local/bin/
 COPY . /app
 WORKDIR /app
 
+# 處理靜態資源
 ARG STATIC_URL
 ENV STATIC_URL=${STATIC_URL:-/static/}
-# 在構建時收集靜態資源，使用 dummy key 避開 Django 檢查
 RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
 
-# 確保所有檔案權限正確
+# 確保權限並切換用戶
 RUN chown -R saleor:saleor /app/
-
 USER saleor
 
 EXPOSE 8000
