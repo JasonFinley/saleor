@@ -9,10 +9,17 @@ RUN apt-get -y update \
 
 # Install Python dependencies
 WORKDIR /app
-RUN --mount=type=cache,mode=0755,target=/root/.cache/pip pip install poetry==1.7.0
+
+# 修正：加上 id=<cache-id> 以符合 Railway/Docker 最新規範
+RUN --mount=type=cache,id=pip-cache,mode=0755,target=/root/.cache/pip \
+    pip install poetry==1.7.0
+
 RUN poetry config virtualenvs.create false
 COPY poetry.lock pyproject.toml /app/
-RUN --mount=type=cache,mode=0755,target=/root/.cache/pypoetry poetry install --no-root
+
+# 修正：針對 poetry 安裝也加上唯一的 cache id
+RUN --mount=type=cache,id=poetry-cache,mode=0755,target=/root/.cache/pypoetry \
+    poetry install --no-root
 
 ### Final image
 FROM python:3.12-slim
@@ -41,6 +48,7 @@ RUN apt-get update \
 RUN mkdir -p /app/media /app/static \
   && chown -R saleor:saleor /app/
 
+# 從 build 階段複製安裝好的套件
 COPY --from=build-python /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 COPY --from=build-python /usr/local/bin/ /usr/local/bin/
 COPY . /app
@@ -48,18 +56,22 @@ WORKDIR /app
 
 ARG STATIC_URL
 ENV STATIC_URL=${STATIC_URL:-/static/}
+# 在構建時收集靜態資源，使用 dummy key 避開 Django 檢查
 RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
+
+# 確保所有檔案權限正確
+RUN chown -R saleor:saleor /app/
+
+USER saleor
 
 EXPOSE 8000
 ENV PYTHONUNBUFFERED=1
 
-LABEL org.opencontainers.image.title="saleor/saleor"                                  \
-      org.opencontainers.image.description="\
-A modular, high performance, headless e-commerce platform built with Python, \
-GraphQL, Django, and ReactJS."                                                         \
-      org.opencontainers.image.url="https://saleor.io/"                                \
-      org.opencontainers.image.source="https://github.com/saleor/saleor"               \
-      org.opencontainers.image.authors="Saleor Commerce (https://saleor.io)"           \
+LABEL org.opencontainers.image.title="saleor/saleor" \
+      org.opencontainers.image.description="A modular, high performance, headless e-commerce platform built with Python, GraphQL, Django, and ReactJS." \
+      org.opencontainers.image.url="https://saleor.io/" \
+      org.opencontainers.image.source="https://github.com/saleor/saleor" \
+      org.opencontainers.image.authors="Saleor Commerce (https://saleor.io)" \
       org.opencontainers.image.licenses="BSD 3"
 
 CMD ["gunicorn", "--bind", ":8000", "--workers", "4", "--worker-class", "saleor.asgi.gunicorn_worker.UvicornWorker", "saleor.asgi:application"]
