@@ -10,21 +10,20 @@ RUN apt-get -y update \
 # Install Python dependencies
 WORKDIR /app
 
-# 修正：加上 s/ 前綴以符合 Railway 構建規範
-RUN --mount=type=cache,id=s/pip-cache,mode=0755,target=/root/.cache/pip \
+# 修正：id 加入 "cache-" 前綴以符合格式規範
+RUN --mount=type=cache,id=cache-pip,mode=0755,target=/root/.cache/pip \
     pip install poetry==1.7.0
 
 RUN poetry config virtualenvs.create false
 COPY poetry.lock pyproject.toml /app/
 
-# 修正：加上 s/ 前綴以符合 Railway 構建規範
-RUN --mount=type=cache,id=s/poetry-cache,mode=0755,target=/root/.cache/pypoetry \
+# 修正：id 加入 "cache-" 前綴
+RUN --mount=type=cache,id=cache-poetry,mode=0755,target=/root/.cache/pypoetry \
     poetry install --no-root
 
 ### Final image
 FROM python:3.12-slim
 
-# 建立執行用戶
 RUN groupadd -r saleor && useradd -r -g saleor saleor
 
 RUN apt-get update \
@@ -48,18 +47,15 @@ RUN apt-get update \
 RUN mkdir -p /app/media /app/static \
   && chown -R saleor:saleor /app/
 
-# 從 build 階段複製已安裝的套件與二進位檔案
 COPY --from=build-python /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 COPY --from=build-python /usr/local/bin/ /usr/local/bin/
 COPY . /app
 WORKDIR /app
 
-# 處理靜態資源
 ARG STATIC_URL
 ENV STATIC_URL=${STATIC_URL:-/static/}
 RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
 
-# 確保權限並切換用戶
 RUN chown -R saleor:saleor /app/
 USER saleor
 
